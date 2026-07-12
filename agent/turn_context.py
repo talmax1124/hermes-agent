@@ -560,7 +560,14 @@ def build_turn_context(
     if agent._memory_manager:
         try:
             _query = original_user_message if isinstance(original_user_message, str) else ""
-            ext_prefetch_cache = agent._memory_manager.prefetch_all(_query) or ""
+            # Scope recall to this session so a shared session-scoped external
+            # provider (Honcho/Hindsight/Mem0 serving concurrent gateway
+            # sessions or cached agents) cannot surface another session's
+            # memories. The paired queue_prefetch_all/sync_all calls already
+            # pass session_id; this one silently defaulted to "" (#leak).
+            ext_prefetch_cache = agent._memory_manager.prefetch_all(
+                _query, session_id=agent.session_id or ""
+            ) or ""
         except Exception:
             pass
 

@@ -27,6 +27,8 @@ the same Converse API integration in TypeScript via ``@aws-sdk/client-bedrock``.
 Requires: ``boto3`` (optional dependency — only needed when using the Bedrock provider).
 """
 
+import base64
+import binascii
 import json
 import logging
 import os
@@ -528,10 +530,27 @@ def _convert_content_to_converse(content) -> List[Dict]:
                         mime_part = header[5:].split(";")[0]
                         if mime_part:
                             media_type = mime_part
+                    # Converse's image.source.bytes is a blob (raw bytes);
+                    # botocore base64-encodes it for the wire. Passing the
+                    # base64 *string* from the data URL through unchanged
+                    # double-encodes it, so every inline image reaching a
+                    # non-Claude Converse model (e.g. amazon.nova-*) is
+                    # corrupted/rejected. Decode to raw bytes first, matching
+                    # the gemini/image-gen adapters.
+                    try:
+                        image_bytes = base64.b64decode(data)
+                    except (binascii.Error, ValueError):
+                        # Not valid base64 — skip rather than send garbage.
+                        continue
+                    # Converse accepts only png/jpeg/gif/webp; normalize the
+                    # subtype and fall back to jpeg for anything exotic
+                    # (e.g. image/svg+xml -> "svg+xml" is not a valid format).
+                    subtype = media_type.split("/")[-1] if "/" in media_type else "jpeg"
+                    image_format = subtype if subtype in {"png", "jpeg", "gif", "webp"} else "jpeg"
                     blocks.append({
                         "image": {
-                            "format": media_type.split("/")[-1] if "/" in media_type else "jpeg",
-                            "source": {"bytes": data},
+                            "format": image_format,
+                            "source": {"bytes": image_bytes},
                         }
                     })
                 else:

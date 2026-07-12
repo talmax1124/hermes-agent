@@ -2101,11 +2101,24 @@ def _convert_user_message(content: Any) -> Dict[str, Any]:
     """Validate and convert a user message to anthropic format."""
     if isinstance(content, list):
         converted_blocks = _convert_content_to_anthropic(content)
-        if not converted_blocks or all(
-            (b.get("text") or "").strip() == ""
-            for b in converted_blocks
-            if isinstance(b, dict) and b.get("type") == "text"
-        ):
+        # Substitute the "(empty message)" placeholder only when there is no
+        # renderable content at all. A message carrying only image blocks (no
+        # text) previously tripped ``all([])`` — the generator filters to text
+        # blocks, and ``all`` of an empty sequence is True — which discarded
+        # the images before they ever reached Claude. Any non-text block
+        # (image, document, tool_result) counts as renderable.
+        def _has_renderable(blocks: Any) -> bool:
+            for b in blocks:
+                if not isinstance(b, dict):
+                    continue
+                if b.get("type") == "text":
+                    if (b.get("text") or "").strip():
+                        return True
+                else:
+                    return True
+            return False
+
+        if not _has_renderable(converted_blocks):
             converted_blocks = [{"type": "text", "text": "(empty message)"}]
         return {"role": "user", "content": converted_blocks}
     else:

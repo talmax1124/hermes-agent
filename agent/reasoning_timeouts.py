@@ -102,8 +102,17 @@ _REASONING_STALE_TIMEOUT_FLOORS: tuple[tuple[str, int], ...] = (
     # ``claude-opus-4`` so non-thinking Claude 3.x or future
     # non-reasoning Claude variants don't match.
     ("claude-opus-4", 240),
+    # Both the dotted marketing form (``claude-sonnet-4.6``) and the
+    # dashed API-id form (``claude-sonnet-4-6``) occur in real configs —
+    # the model id reaching this resolver depends on how the provider/
+    # catalog names it, and Anthropic's own message API uses the dashed
+    # form (``claude-sonnet-4-5-20250929``). ``re.escape`` matches the
+    # ``.`` literally, so a dotted-only entry silently misses every
+    # dashed id and the reasoning floor never fires. Enumerate both.
     ("claude-sonnet-4.5", 180),
     ("claude-sonnet-4.6", 180),
+    ("claude-sonnet-4-5", 180),
+    ("claude-sonnet-4-6", 180),
     # xAI Grok reasoning variants.  Explicit reasoning-only keys
     # plus one for the ``non-reasoning`` variant so users picking
     # the fast variant don't get the 300s floor.  Bare ``grok-3``,

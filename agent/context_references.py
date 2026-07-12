@@ -465,8 +465,13 @@ def _remove_reference_tokens(message: str, refs: list[ContextReference]) -> str:
         cursor = ref.end
     pieces.append(message[cursor:])
     text = "".join(pieces)
-    text = re.sub(r"\s{2,}", " ", text)
-    text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+    # Collapse only *horizontal* whitespace left behind by the removed token
+    # (e.g. "see @file:foo now" -> "see  now" -> "see now"). Using \s here also
+    # ate newlines and indentation, so any multiline message that happened to
+    # contain an @reference had its code fences, line breaks, and list/stack
+    # structure flattened onto one line. Preserve newlines.
+    text = re.sub(r"[^\S\n]{2,}", " ", text)
+    text = re.sub(r"[^\S\n]+([,.;:!?])", r"\1", text)
     return text.strip()
 
 
@@ -476,7 +481,13 @@ def _is_binary_file(path: Path) -> bool:
         path.name.endswith(ext) for ext in (".py", ".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".js", ".ts")
     ):
         return True
-    chunk = path.read_bytes()[:4096]
+    # Bounded read: a large text/* file (e.g. a multi-GB .log) passes the
+    # mime gate above, so slurping the whole file with read_bytes() before
+    # slicing would OOM/stall on a @file:/@folder: reference. The gateway
+    # feeds untrusted remote text into this path, making an unbounded read a
+    # remote-triggerable resource exhaustion. Read only the sniff window.
+    with open(path, "rb") as fh:
+        chunk = fh.read(4096)
     return b"\x00" in chunk
 
 
