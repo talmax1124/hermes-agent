@@ -780,8 +780,11 @@ def test_provider_message_sanitizer_preserves_tool_results_and_content():
         {"role": "assistant", "content": "plain", "tool_calls": None},
         tool_result,
     ]
-    out, repaired = sanitize_provider_messages(messages)
-    assert repaired == 1
+    out, metrics = sanitize_provider_messages(messages)
+    assert metrics.empty_tool_calls_removed == 1
     assert out[0] == {"role": "assistant", "content": "plain"}
-    assert out[1] is tool_result
+    # The result is orphaned because its assistant declaration was invalid.
+    assert len(out) == 1
+    assert metrics.orphan_tool_messages_removed == 1
     assert messages[0]["tool_calls"] is None
+    assert tool_result in messages

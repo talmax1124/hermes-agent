@@ -2495,13 +2495,13 @@ def sanitize_api_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]
     # persisted trajectory. Shallow-copy the message before dropping the key so
     # stored history (and prompt caching) stays byte-stable.
     from agent.message_sanitization import sanitize_provider_messages
-    normalized, dropped_empty_tool_calls = sanitize_provider_messages(messages)
-    if dropped_empty_tool_calls:
+    normalized, provider_metrics = sanitize_provider_messages(messages)
+    if provider_metrics.empty_tool_calls_removed:
         messages = normalized
         _ra().logger.debug(
             "Pre-call sanitizer: dropped empty/invalid tool_calls on %d "
             "assistant message(s)",
-            dropped_empty_tool_calls,
+            provider_metrics.empty_tool_calls_removed,
         )
 
     # --- Repair tool_calls whose function.name is empty/missing ---

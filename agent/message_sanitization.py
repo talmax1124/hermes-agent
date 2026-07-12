@@ -17,6 +17,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+from copy import deepcopy
+from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -28,7 +30,16 @@ logger = logging.getLogger(__name__)
 _SURROGATE_RE = re.compile(r'[\ud800-\udfff]')
 
 
-def sanitize_provider_messages(messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+@dataclass(frozen=True)
+class ProviderMessageSanitizationMetrics:
+    messages_inspected: int = 0
+    empty_tool_calls_removed: int = 0
+    orphan_tool_messages_removed: int = 0
+
+
+def sanitize_provider_messages(
+    messages: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], ProviderMessageSanitizationMetrics]:
     """Return a provider-safe, copy-on-write message list.
 
     Strict OpenAI-compatible providers require ``tool_calls`` to be a
@@ -36,26 +47,101 @@ def sanitize_provider_messages(messages: list[dict[str, Any]]) -> tuple[list[dic
     all mean "no tool calls", so omit the field from assistant messages while
     preserving content and every other message (including tool results).
 
-    The input list and its message dictionaries are never mutated.  Valid,
-    non-empty tool-call arrays are retained by reference so opaque provider
-    metadata is preserved exactly.
+    Tool-result messages whose ``tool_call_id`` has no preceding, valid
+    assistant tool call are removed.  The input graph is never mutated: every
+    retained message (including nested tool-call/provider metadata) is copied.
     """
-    sanitized: list[dict[str, Any]] = []
-    repaired = 0
+    normalized: list[dict[str, Any]] = []
+    empty_removed = 0
     for message in messages:
         if not isinstance(message, dict):
-            sanitized.append(message)
+            normalized.append(deepcopy(message))
             continue
-        tool_calls = message.get("tool_calls")
-        if (
-            message.get("role") == "assistant"
-            and "tool_calls" in message
-            and not (isinstance(tool_calls, list) and len(tool_calls) > 0)
-        ):
-            message = {key: value for key, value in message.items() if key != "tool_calls"}
-            repaired += 1
+        copied = deepcopy(message)
+        if "tool_calls" in copied:
+            tool_calls = copied.get("tool_calls")
+            if not (isinstance(tool_calls, list) and tool_calls):
+                copied.pop("tool_calls", None)
+                empty_removed += 1
+        normalized.append(copied)
+
+    # Tool results are only valid after a preceding assistant declaration.
+    # Track declarations in wire order rather than globally so a stale result
+    # cannot bind to a same-id call appearing later in the conversation.
+    declared_ids: set[str] = set()
+    sanitized: list[dict[str, Any]] = []
+    orphan_removed = 0
+    for message in normalized:
+        if isinstance(message, dict) and message.get("role") == "assistant":
+            for tool_call in message.get("tool_calls") or []:
+                if isinstance(tool_call, dict):
+                    call_id = tool_call.get("id") or tool_call.get("call_id")
+                else:
+                    call_id = getattr(tool_call, "id", None) or getattr(tool_call, "call_id", None)
+                if isinstance(call_id, str) and call_id.strip():
+                    declared_ids.add(call_id.strip())
+        if isinstance(message, dict) and message.get("role") == "tool":
+            call_id = message.get("tool_call_id")
+            if not isinstance(call_id, str) or call_id.strip() not in declared_ids:
+                orphan_removed += 1
+                continue
         sanitized.append(message)
-    return sanitized, repaired
+
+    return sanitized, ProviderMessageSanitizationMetrics(
+        messages_inspected=len(messages),
+        empty_tool_calls_removed=empty_removed,
+        orphan_tool_messages_removed=orphan_removed,
+    )
+
+
+def sanitize_provider_request_kwargs(
+    api_kwargs: dict[str, Any], *, request_logger: logging.Logger | None = None
+) -> dict[str, Any]:
+    """Copy and sanitize the final kwargs handed to any provider SDK.
+
+    Both Chat Completions (``messages``) and reconstructed Responses payloads
+    (``input``) are covered.  Logging contains counts only, never content.
+    """
+    sanitized_kwargs = dict(api_kwargs)
+    inspected = empty_removed = orphan_removed = 0
+    for key in ("messages", "input"):
+        value = sanitized_kwargs.get(key)
+        if not isinstance(value, list):
+            continue
+        cleaned, metrics = sanitize_provider_messages(value)
+        if key == "input":
+            # Responses API conversations use function_call / function_call_output
+            # items instead of assistant/tool roles. Conversion can happen after
+            # the conversation-loop sanitizer, so pair them again at this final
+            # boundary and drop only outputs with no preceding declaration.
+            declared_response_calls: set[str] = set()
+            paired: list[Any] = []
+            response_orphans = 0
+            for item in cleaned:
+                if isinstance(item, dict) and item.get("type") == "function_call":
+                    call_id = item.get("call_id") or item.get("id")
+                    if isinstance(call_id, str) and call_id.strip():
+                        declared_response_calls.add(call_id.strip())
+                if isinstance(item, dict) and item.get("type") == "function_call_output":
+                    call_id = item.get("call_id")
+                    if not isinstance(call_id, str) or call_id.strip() not in declared_response_calls:
+                        response_orphans += 1
+                        continue
+                paired.append(item)
+            cleaned = paired
+            orphan_removed += response_orphans
+        sanitized_kwargs[key] = cleaned
+        inspected += metrics.messages_inspected
+        empty_removed += metrics.empty_tool_calls_removed
+        orphan_removed += metrics.orphan_tool_messages_removed
+    (request_logger or logger).debug(
+        "Final provider payload sanitizer: messages_inspected=%d "
+        "empty_tool_calls_removed=%d orphan_tool_messages_removed=%d",
+        inspected,
+        empty_removed,
+        orphan_removed,
+    )
+    return sanitized_kwargs
 
 
 def _sanitize_surrogates(text: str) -> str:

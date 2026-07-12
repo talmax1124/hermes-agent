@@ -1733,12 +1733,12 @@ class APIServerAdapter(BasePlatformAdapter):
         """Repair provider-invalid legacy messages without rewriting storage."""
         from agent.message_sanitization import sanitize_provider_messages
 
-        sanitized, repaired = sanitize_provider_messages(history)
-        if repaired:
+        sanitized, metrics = sanitize_provider_messages(history)
+        if metrics.empty_tool_calls_removed:
             logger.warning(
                 "history_repair: omitted empty/invalid assistant tool_calls "
                 "from %d message(s) during reconstruction (source=%s)",
-                repaired,
+                metrics.empty_tool_calls_removed,
                 source,
             )
         return sanitized

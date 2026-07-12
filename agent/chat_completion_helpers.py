@@ -373,6 +373,12 @@ def interruptible_api_call(agent, api_kwargs: dict):
     the main retry loop can try again with backoff / credential rotation /
     provider fallback.
     """
+    # This is the last shared boundary before native/OpenAI/Responses/Bedrock
+    # dispatch. Re-sanitize here because middleware and provider conversion can
+    # reconstruct or replace the earlier conversation-loop copy.
+    from agent.message_sanitization import sanitize_provider_request_kwargs
+    api_kwargs = sanitize_provider_request_kwargs(api_kwargs, request_logger=logger)
+
     # Cron and other non-interactive, nested-pool contexts must not spawn the
     # interrupt worker — it wedges before the socket opens on the 2nd+ call
     # (#62151). Run inline instead. See should_use_direct_api_call.
@@ -1962,6 +1968,9 @@ def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=
     Falls back to _interruptible_api_call on provider errors indicating
     streaming is not supported.
     """
+    from agent.message_sanitization import sanitize_provider_request_kwargs
+    api_kwargs = sanitize_provider_request_kwargs(api_kwargs, request_logger=logger)
+
     if agent._interrupt_requested:
         raise InterruptedError("Agent interrupted before streaming API call")
 
