@@ -770,3 +770,18 @@ def test_sanitize_preserves_populated_tool_calls():
     out = sanitize_api_messages(list(messages))
     assistant = [m for m in out if m.get("role") == "assistant"][0]
     assert [tc["id"] for tc in assistant["tool_calls"]] == ["call_Z"]
+
+
+def test_provider_message_sanitizer_preserves_tool_results_and_content():
+    from agent.message_sanitization import sanitize_provider_messages
+
+    tool_result = {"role": "tool", "tool_call_id": "call_Z", "content": "done"}
+    messages = [
+        {"role": "assistant", "content": "plain", "tool_calls": None},
+        tool_result,
+    ]
+    out, repaired = sanitize_provider_messages(messages)
+    assert repaired == 1
+    assert out[0] == {"role": "assistant", "content": "plain"}
+    assert out[1] is tool_result
+    assert messages[0]["tool_calls"] is None

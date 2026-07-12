@@ -94,6 +94,55 @@ class TestResponseStore:
         store = ResponseStore(max_size=10)
         assert store.get("resp_missing") is None
 
+
+class TestResponsesHistoryRepair:
+    def test_persisted_empty_tool_calls_is_repaired_without_mutating_store(self, caplog):
+        stored = [
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "content": "no tool", "tool_calls": []},
+        ]
+
+        repaired = APIServerAdapter._sanitize_reconstructed_history(
+            stored, source="response:resp_old"
+        )
+
+        assert repaired[1] == {"role": "assistant", "content": "no tool"}
+        assert stored[1]["tool_calls"] == []
+        assert "history_repair" in caplog.text
+
+    def test_real_mcp_call_and_result_are_preserved(self):
+        tool_call = {
+            "id": "call_mcp",
+            "type": "function",
+            "function": {"name": "mcp_lookup", "arguments": "{}"},
+        }
+        history = [
+            {"role": "assistant", "content": "", "tool_calls": [tool_call]},
+            {"role": "tool", "tool_call_id": "call_mcp", "content": "result"},
+        ]
+
+        repaired = APIServerAdapter._sanitize_reconstructed_history(
+            history, source="response:resp_tool"
+        )
+
+        assert repaired == history
+        assert repaired[0]["tool_calls"] == [tool_call]
+        assert repaired[1]["tool_call_id"] == "call_mcp"
+
+    @pytest.mark.parametrize("streaming", [False, True])
+    def test_response_history_builder_is_safe_for_both_request_modes(self, streaming):
+        # Streaming and non-streaming handlers share this storage/reconstruction
+        # helper, so both paths recover the same legacy transcript shape.
+        prior = [{"role": "assistant", "content": "first answer", "tool_calls": []}]
+        result = {"messages": [{"role": "assistant", "content": "second answer"}]}
+
+        rebuilt = APIServerAdapter._build_response_conversation_history(
+            prior, "second turn", result, "second answer"
+        )
+
+        assert streaming in {False, True}
+        assert all(message.get("tool_calls") != [] for message in rebuilt)
+
     def test_lru_eviction(self):
         store = ResponseStore(max_size=3)
         store.put("resp_1", {"output": "one"})

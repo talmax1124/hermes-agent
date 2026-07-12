@@ -1720,10 +1720,28 @@ class APIServerAdapter(BasePlatformAdapter):
         if db is None:
             return []
         try:
-            return db.get_messages_as_conversation(session_id)
+            history = db.get_messages_as_conversation(session_id)
+            return self._sanitize_reconstructed_history(history, source=f"session:{session_id}")
         except Exception as exc:
             logger.warning("Failed to load session history for %s: %s", session_id, exc)
             return []
+
+    @staticmethod
+    def _sanitize_reconstructed_history(
+        history: List[Dict[str, Any]], *, source: str
+    ) -> List[Dict[str, Any]]:
+        """Repair provider-invalid legacy messages without rewriting storage."""
+        from agent.message_sanitization import sanitize_provider_messages
+
+        sanitized, repaired = sanitize_provider_messages(history)
+        if repaired:
+            logger.warning(
+                "history_repair: omitted empty/invalid assistant tool_calls "
+                "from %d message(s) during reconstruction (source=%s)",
+                repaired,
+                source,
+            )
+        return sanitized
 
     async def _handle_list_sessions(self, request: "web.Request") -> "web.Response":
         """GET /api/sessions — list persisted Hermes sessions."""
@@ -3321,7 +3339,10 @@ class APIServerAdapter(BasePlatformAdapter):
             stored = self._response_store.get(previous_response_id)
             if stored is None:
                 return web.json_response(_openai_error(f"Previous response not found: {previous_response_id}"), status=404)
-            conversation_history = list(stored.get("conversation_history", []))
+            conversation_history = self._sanitize_reconstructed_history(
+                list(stored.get("conversation_history", [])),
+                source=f"response:{previous_response_id}",
+            )
             stored_session_id = stored.get("session_id")
             # If no instructions provided, carry forward from previous
             if instructions is None:
@@ -3861,7 +3882,9 @@ class APIServerAdapter(BasePlatformAdapter):
         final_response: Any,
     ) -> List[Dict[str, Any]]:
         """Build the stored Responses transcript without duplicating history."""
-        prior = list(conversation_history)
+        prior = APIServerAdapter._sanitize_reconstructed_history(
+            list(conversation_history), source="response-store"
+        )
         current_user = {"role": "user", "content": user_message}
         agent_messages = result.get("messages") if isinstance(result, dict) else None
 
@@ -3872,12 +3895,16 @@ class APIServerAdapter(BasePlatformAdapter):
                 result,
             )
             if turn_start:
-                return list(agent_messages)
+                return APIServerAdapter._sanitize_reconstructed_history(
+                    list(agent_messages), source="agent-transcript"
+                )
 
             full_history = prior
             full_history.append(current_user)
             full_history.extend(agent_messages)
-            return full_history
+            return APIServerAdapter._sanitize_reconstructed_history(
+                full_history, source="agent-transcript"
+            )
 
         full_history = prior
         full_history.append(current_user)

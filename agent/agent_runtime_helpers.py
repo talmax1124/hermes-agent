@@ -2494,18 +2494,8 @@ def sanitize_api_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]
     # ``repair_message_sequence``, which would destructively rewrite the
     # persisted trajectory. Shallow-copy the message before dropping the key so
     # stored history (and prompt caching) stays byte-stable.
-    normalized: List[Dict[str, Any]] = []
-    dropped_empty_tool_calls = 0
-    for msg in messages:
-        if (
-            isinstance(msg, dict)
-            and msg.get("role") == "assistant"
-            and "tool_calls" in msg
-            and not (isinstance(msg["tool_calls"], list) and msg["tool_calls"])
-        ):
-            msg = {k: v for k, v in msg.items() if k != "tool_calls"}
-            dropped_empty_tool_calls += 1
-        normalized.append(msg)
+    from agent.message_sanitization import sanitize_provider_messages
+    normalized, dropped_empty_tool_calls = sanitize_provider_messages(messages)
     if dropped_empty_tool_calls:
         messages = normalized
         _ra().logger.debug(

@@ -28,6 +28,36 @@ logger = logging.getLogger(__name__)
 _SURROGATE_RE = re.compile(r'[\ud800-\udfff]')
 
 
+def sanitize_provider_messages(messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    """Return a provider-safe, copy-on-write message list.
+
+    Strict OpenAI-compatible providers require ``tool_calls`` to be a
+    non-empty array when present.  Missing, null, non-array, and empty values
+    all mean "no tool calls", so omit the field from assistant messages while
+    preserving content and every other message (including tool results).
+
+    The input list and its message dictionaries are never mutated.  Valid,
+    non-empty tool-call arrays are retained by reference so opaque provider
+    metadata is preserved exactly.
+    """
+    sanitized: list[dict[str, Any]] = []
+    repaired = 0
+    for message in messages:
+        if not isinstance(message, dict):
+            sanitized.append(message)
+            continue
+        tool_calls = message.get("tool_calls")
+        if (
+            message.get("role") == "assistant"
+            and "tool_calls" in message
+            and not (isinstance(tool_calls, list) and len(tool_calls) > 0)
+        ):
+            message = {key: value for key, value in message.items() if key != "tool_calls"}
+            repaired += 1
+        sanitized.append(message)
+    return sanitized, repaired
+
+
 def _sanitize_surrogates(text: str) -> str:
     """Replace lone surrogate code points with U+FFFD (replacement character).
 
