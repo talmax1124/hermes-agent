@@ -6,6 +6,7 @@ import { rpcErrorMessage } from '../lib/rpc.js'
 import type { Theme } from '../theme.js'
 
 import { OverlayHint, useOverlayKeys, windowItems, windowOffset } from './overlayControls.js'
+import { SelectableRow } from './selectableRow.js'
 
 const VISIBLE = 12
 const MIN_WIDTH = 40
@@ -217,16 +218,37 @@ export function SkillsHub({ gw, onClose, t }: SkillsHubProps) {
           const idx = offset + i
 
           return (
-            <Text
-              bold={catIdx === idx}
-              color={catIdx === idx ? t.color.accent : t.color.muted}
-              inverse={catIdx === idx}
+            <SelectableRow
+              index={idx}
+              isActive={catIdx === idx}
               key={row}
-              wrap="truncate-end"
+              onActivate={n => {
+                if (installing) {
+                  return
+                }
+
+                const cat = cats[n]
+
+                if (cat) {
+                  setSelectedCat(cat)
+                  setCatIdx(n)
+                  setSkillIdx(0)
+                  setStage('skill')
+                }
+              }}
+              onSelect={setCatIdx}
+              width={width}
             >
-              {catIdx === idx ? '▸ ' : '  '}
-              {i + 1}. {row}
-            </Text>
+              <Text
+                bold={catIdx === idx}
+                color={catIdx === idx ? t.color.accent : t.color.muted}
+                inverse={catIdx === idx}
+                wrap="truncate-end"
+              >
+                {catIdx === idx ? '▸ ' : '  '}
+                {i + 1}. {row}
+              </Text>
+            </SelectableRow>
           )
         })}
 
@@ -253,16 +275,36 @@ export function SkillsHub({ gw, onClose, t }: SkillsHubProps) {
           const idx = offset + i
 
           return (
-            <Text
-              bold={skillIdx === idx}
-              color={skillIdx === idx ? t.color.accent : t.color.muted}
-              inverse={skillIdx === idx}
+            <SelectableRow
+              index={idx}
+              isActive={skillIdx === idx}
               key={row}
-              wrap="truncate-end"
+              onActivate={n => {
+                if (installing) {
+                  return
+                }
+
+                const name = skills[n]
+
+                if (name) {
+                  setSkillIdx(n)
+                  setStage('actions')
+                  inspect(name)
+                }
+              }}
+              onSelect={setSkillIdx}
+              width={width}
             >
-              {skillIdx === idx ? '▸ ' : '  '}
-              {i + 1}. {row}
-            </Text>
+              <Text
+                bold={skillIdx === idx}
+                color={skillIdx === idx ? t.color.accent : t.color.muted}
+                inverse={skillIdx === idx}
+                wrap="truncate-end"
+              >
+                {skillIdx === idx ? '▸ ' : '  '}
+                {i + 1}. {row}
+              </Text>
+            </SelectableRow>
           )
         })}
 

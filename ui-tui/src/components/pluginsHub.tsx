@@ -6,6 +6,7 @@ import { rpcErrorMessage } from '../lib/rpc.js'
 import type { Theme } from '../theme.js'
 
 import { OverlayHint, useOverlayKeys, windowItems, windowOffset } from './overlayControls.js'
+import { SelectableRow } from './selectableRow.js'
 
 const VISIBLE = 12
 const MIN_WIDTH = 44
@@ -206,16 +207,26 @@ export function PluginsHub({ gw, onClose, t }: PluginsHubProps) {
         const active = clampedIdx === lineIdx
 
         return (
-          <Text
-            bold={active}
-            color={active ? t.color.accent : t.color.muted}
-            inverse={active}
+          <SelectableRow
+            index={lineIdx}
+            isActive={active}
             key={effectiveRows[lineIdx]?.name ?? row}
-            wrap="truncate-end"
+            onActivate={n => {
+              const target = effectiveRows[n]
+
+              if (target) {
+                setIdx(n)
+                toggle(target)
+              }
+            }}
+            onSelect={setIdx}
+            width={width}
           >
-            {active ? '▸ ' : '  '}
-            {i + 1}. {row}
-          </Text>
+            <Text bold={active} color={active ? t.color.accent : t.color.muted} inverse={active} wrap="truncate-end">
+              {active ? '▸ ' : '  '}
+              {i + 1}. {row}
+            </Text>
+          </SelectableRow>
         )
       })}
 

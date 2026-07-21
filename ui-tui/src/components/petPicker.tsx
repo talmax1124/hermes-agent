@@ -6,6 +6,7 @@ import { rpcErrorMessage } from '../lib/rpc.js'
 import type { Theme } from '../theme.js'
 
 import { OverlayHint, windowItems } from './overlayControls.js'
+import { SelectableRow } from './selectableRow.js'
 
 const VISIBLE = 10
 const MIN_WIDTH = 40
@@ -147,21 +148,37 @@ export function PetPicker({ gw, onClose, t }: PetPickerProps) {
         <Text color={t.color.muted}>{query ? `no pets match "${query}"` : 'no pets available'}</Text>
       ) : (
         items.map((pet, i) => {
-          const at = offset + i === idx
+          const rowIdx = offset + i
+          const at = rowIdx === idx
           const isActive = enabled && pet.slug === active
           const mark = isActive ? '●' : pet.installed ? '✓' : ' '
           const tag = pet.installed ? '' : pet.curated ? ' · official' : ''
 
           return (
-            <Text bold={at} color={at ? t.color.accent : t.color.muted} inverse={at} key={pet.slug} wrap="truncate-end">
-              {at ? '▸ ' : '  '}
-              {mark} {pet.displayName}
-              <Text color={at ? t.color.accent : t.color.muted}>
-                {' '}
-                ({pet.slug}
-                {tag})
+            <SelectableRow
+              index={rowIdx}
+              isActive={at}
+              key={pet.slug}
+              onActivate={n => {
+                const p = view[n]
+
+                if (p && !busy) {
+                  void adopt(p.slug)
+                }
+              }}
+              onSelect={setIdx}
+              width={width}
+            >
+              <Text bold={at} color={at ? t.color.accent : t.color.muted} inverse={at} wrap="truncate-end">
+                {at ? '▸ ' : '  '}
+                {mark} {pet.displayName}
+                <Text color={at ? t.color.accent : t.color.muted}>
+                  {' '}
+                  ({pet.slug}
+                  {tag})
+                </Text>
               </Text>
-            </Text>
+            </SelectableRow>
           )
         })
       )}
